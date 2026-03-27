@@ -1,0 +1,84 @@
+name: MLOps CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  # ==========================================
+  # ÉTAPE 1 : TESTS ET VALIDATION
+  # ==========================================
+  test_and_validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v3
+        with:
+          lfs: true # Obligatoire pour charger le modèle .pkl
+
+      - name: Configuration de Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Installation des dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Exécution des tests unitaires (Pytest)
+        run: |
+          pytest tests/
+
+  # ==========================================
+  # ÉTAPE 2 : NOTIFICATION PAR EMAIL
+  # ==========================================
+  notify:
+    needs: test_and_validate
+    if: always() # S'exécute même si les tests échouent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Envoi du rapport par email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp-mail.outlook.com
+          server_port: 587
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: 🤖 Rapport CI/CD MLOps - Statut : ${{ needs.test_and_validate.result }}
+          to: aimethmbog@outlook.fr
+          from: Pipeline GitHub Actions
+          body: |
+            Bonjour l'équipe,
+            
+            Le pipeline d'intégration continue vient de se terminer.
+            Voici le rapport généré automatiquement :
+            
+            - Statut des tests (Accuracy > 80%) : ${{ needs.test_and_validate.result }}
+            - Branche concernée : ${{ github.ref }}
+            - Auteur du commit : ${{ github.actor }}
+            
+            Vous pouvez consulter les logs détaillés ici : https://github.com/${{ github.repository }}/actions
+
+  # ==========================================
+  # ÉTAPE 3 : DÉPLOIEMENT HUGGING FACE
+  # ==========================================
+  deploy:
+    needs: test_and_validate
+    # Ne se déploie QUE si les tests sont OK ET qu'on est sur la branche 'main'
+    if: success() && github.ref == 'refs/heads/main' 
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v3
+        with:
+          lfs: true
+
+      - name: Push vers Hugging Face Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git remote add space https://huggingface.co/spaces/aimethaer1/analyse-sentiments-mlops
+          git push https://aimethaer1:$HF_TOKEN@huggingface.co/spaces/aimethaer1/analyse-sentiments-mlops main --force
